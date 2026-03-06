@@ -1,0 +1,127 @@
+name: EKS CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-2
+  EKS_CLUSTER_NAME: saas-eks-dev
+  ECR_USERS_REPO: users-service
+  ECR_BILLING_REPO: billing-service
+  ECR_GATEWAY_REPO: gateway-api
+  K8S_NAMESPACE: saas
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        service:
+          - users-service
+          - billing-service
+          - gateway-api
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          cd services/${{ matrix.service }}
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: |
+          cd services/${{ matrix.service }}
+          pytest -q
+
+  build-and-deploy:
+    name: Build, Push, and Deploy
+    runs-on: ubuntu-latest
+    needs: test
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: vars
+        run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+      - name: Build and push users-service
+        run: |
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_USERS_REPO }}:${IMAGE_TAG} ./services/users-service
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_USERS_REPO }}:${IMAGE_TAG}
+
+      - name: Build and push billing-service
+        run: |
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BILLING_REPO }}:${IMAGE_TAG} ./services/billing-service
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BILLING_REPO }}:${IMAGE_TAG}
+
+      - name: Build and push gateway-api
+        run: |
+          docker build -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_GATEWAY_REPO }}:${IMAGE_TAG} ./services/gateway-api
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_GATEWAY_REPO }}:${IMAGE_TAG}
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+
+      - name: Deploy to EKS with Helm
+        run: |
+          helm upgrade --install saas ./helm/saas \
+            -n $K8S_NAMESPACE --create-namespace \
+            --set users-service.replicaCount=1 \
+            --set billing-service.replicaCount=1 \
+            --set gateway-api.replicaCount=1 \
+            --set users-service.image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_USERS_REPO }} \
+            --set users-service.image.tag=${IMAGE_TAG} \
+            --set billing-service.image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BILLING_REPO }} \
+            --set billing-service.image.tag=${IMAGE_TAG} \
+            --set gateway-api.image.repository=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_GATEWAY_REPO }} \
+            --set gateway-api.image.tag=${IMAGE_TAG} \
+            --set gateway-api.env.USERS_BASE_URL=http://saas-users-service:8000 \
+            --set gateway-api.env.BILLING_BASE_URL=http://saas-billing-service:8000 \
+            --set users-service.resources.requests.cpu=25m \
+            --set users-service.resources.requests.memory=64Mi \
+            --set users-service.resources.limits.cpu=100m \
+            --set users-service.resources.limits.memory=128Mi \
+            --set billing-service.resources.requests.cpu=25m \
+            --set billing-service.resources.requests.memory=64Mi \
+            --set billing-service.resources.limits.cpu=100m \
+            --set billing-service.resources.limits.memory=128Mi \
+            --set gateway-api.resources.requests.cpu=25m \
+            --set gateway-api.resources.requests.memory=64Mi \
+            --set gateway-api.resources.limits.cpu=150m \
+            --set gateway-api.resources.limits.memory=128Mi
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n $K8S_NAMESPACE
+          kubectl get svc -n $K8S_NAMESPACE

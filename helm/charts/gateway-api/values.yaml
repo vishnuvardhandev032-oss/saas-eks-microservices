@@ -1,0 +1,23 @@
+replicaCount: 2
+
+image:
+  repository: gateway-api
+  tag: "local"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+
+env:
+  SERVICE_NAME: gateway-api
+  USERS_BASE_URL: http://users-service:8000
+  BILLING_BASE_URL: http://billing-service:8000
+
+resources:
+  requests:
+    cpu: 150m
+    memory: 128Mi
+  limits:
+    cpu: 400m
+    memory: 256Mi

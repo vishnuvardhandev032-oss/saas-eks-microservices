@@ -1,0 +1,12 @@
+dependencies:
+- name: users-service
+  repository: file://../charts/users-service
+  version: 0.1.0
+- name: billing-service
+  repository: file://../charts/billing-service
+  version: 0.1.0
+- name: gateway-api
+  repository: file://../charts/gateway-api
+  version: 0.1.0
+digest: sha256:c1700ac1be1c1c0286662f72f794a6db9de404efb8eb410d5a2f16bb5da22eb7
+generated: "2026-03-05T12:43:22.366082226-05:00"

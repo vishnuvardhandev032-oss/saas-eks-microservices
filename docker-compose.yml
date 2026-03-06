@@ -1,0 +1,29 @@
+services:
+  users-service:
+    build: ./services/users-service
+    container_name: users-service
+    ports:
+      - "8001:8000"
+    environment:
+      - SERVICE_NAME=users-service
+
+  billing-service:
+    build: ./services/billing-service
+    container_name: billing-service
+    ports:
+      - "8002:8000"
+    environment:
+      - SERVICE_NAME=billing-service
+
+  gateway-api:
+    build: ./services/gateway-api
+    container_name: gateway-api
+    ports:
+      - "8000:8000"
+    environment:
+      - SERVICE_NAME=gateway-api
+      - USERS_BASE_URL=http://users-service:8000
+      - BILLING_BASE_URL=http://billing-service:8000
+    depends_on:
+      - users-service
+      - billing-service
