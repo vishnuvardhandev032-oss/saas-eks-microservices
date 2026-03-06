@@ -44,7 +44,7 @@ jobs:
       - name: Run tests
         run: |
           cd services/${{ matrix.service }}
-          pytest -q
+          PYTHONPATH=. python -m pytest -q
 
   build-and-deploy:
     name: Build, Push, and Deploy
